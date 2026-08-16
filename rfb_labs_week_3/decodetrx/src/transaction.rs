@@ -15,6 +15,11 @@ pub struct Input {
     pub output_index: u32,
     pub script_sig: String,
     pub sequence: u32,
+    // Witness data lives outside the input in the serialised transaction, but
+    // belongs to it logically. Absent on legacy transactions, so it stays out
+    // of their output entirely.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub witness: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]

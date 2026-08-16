@@ -148,6 +148,7 @@ pub fn decode_transaction(transaction_hex: String) -> Result<String, Box<dyn std
             output_index,
             script_sig,
             sequence,
+            witness: None,
         });
     }
 
@@ -167,21 +168,16 @@ pub fn decode_transaction(transaction_hex: String) -> Result<String, Box<dyn std
     let witness_start = transaction_bytes.len() - bytes_slice.len();
 
     if is_segwit {
-        // Every input carries its own witness stack. We walk it to reach the
-        // lock time, but none of it belongs to the decoded output or the txid.
-        for _ in 0..input_count {
+        // Every input carries its own witness stack, in input order. Each item
+        // is a length-prefixed blob, the same shape as a script, so the same
+        // reader handles it.
+        for input in inputs.iter_mut() {
             let item_count = read_compact_size(&mut bytes_slice)?;
+            let mut items = Vec::new();
             for _ in 0..item_count {
-                let item_size = read_compact_size(&mut bytes_slice)? as usize;
-                if bytes_slice.len() < item_size {
-                    return Err(Box::new(Error::new(
-                        ErrorKind::UnexpectedEof,
-                        "witness item is shorter than its length prefix",
-                    )));
-                }
-                let mut item = vec![0_u8; item_size];
-                bytes_slice.read_exact(&mut item)?;
+                items.push(read_script_size(&mut bytes_slice)?);
             }
+            input.witness = Some(items);
         }
     }
 
@@ -285,6 +281,18 @@ mod tests {
         assert_eq!(decoded["inputs"][0]["script_sig"], "");
         assert_eq!(decoded["inputs"][0]["sequence"], 4_294_967_295_u32);
 
+        // A P2WPKH witness is a two item stack: signature then public key.
+        let witness = decoded["inputs"][0]["witness"].as_array().unwrap();
+        assert_eq!(witness.len(), 2);
+        assert_eq!(
+            witness[0],
+            "304402204d94a1e4047ca38a450177ccb6f88585ca147f1939df343d8ac5d962c5f35bb302206f7fa42c21c47ebccdc460393d35c5dfd3b6f0a26cf10fac23d3e6fab71835c201"
+        );
+        assert_eq!(
+            witness[1],
+            "020cb972a66e3fb1cdcc9efcad060b4457ebec534942700d4af1c0d82a33aa13f1"
+        );
+
         assert_eq!(decoded["outputs"].as_array().unwrap().len(), 2);
         assert_eq!(decoded["outputs"][0]["amount"], 0.000001);
         assert_eq!(
@@ -305,6 +313,8 @@ mod tests {
         );
         assert_eq!(decoded["version"], 1);
         assert_eq!(decoded["inputs"].as_array().unwrap().len(), 1);
+        // No witness section on a legacy transaction, so the key is absent.
+        assert!(decoded["inputs"][0].get("witness").is_none());
         assert_eq!(decoded["outputs"].as_array().unwrap().len(), 2);
         assert_eq!(decoded["outputs"][0]["amount"], 10.0);
         assert_eq!(decoded["outputs"][1]["amount"], 40.0);
