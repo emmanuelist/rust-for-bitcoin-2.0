@@ -302,6 +302,35 @@ mod tests {
         assert_eq!(decoded["outputs"][1]["amount"], 0.04462282);
     }
 
+    // Hand built rather than taken from a block, to reach shapes the two real
+    // samples do not: several inputs, a witness stack that is empty on one input
+    // while the others carry items, and an amount spanning the full u64 range.
+    #[test]
+    fn decodes_multiple_inputs_and_mixed_witness_stacks() {
+        const TX: &str = "02000000000103000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0100000000fdffffff202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3ffe00000000fdffffffabababababababababababababababababababababababababababababababab0700000048471111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111fdffffff02a086010000000000160014cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd0040075af0750700016a0248303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030210202020202020202020202020202020202020202020202020202020202020202020140515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151510020a10700";
+
+        let decoded: serde_json::Value =
+            serde_json::from_str(&decode_transaction(TX.to_string()).unwrap()).unwrap();
+
+        assert_eq!(
+            decoded["transaction_id"],
+            "6242bb2516c7ea43496586d8351c7e302e18b1ed1e90c15babf3836296ce8166"
+        );
+        assert_eq!(decoded["lock_time"], 500_000);
+
+        let inputs = decoded["inputs"].as_array().unwrap();
+        assert_eq!(inputs.len(), 3);
+        assert_eq!(inputs[0]["witness"].as_array().unwrap().len(), 2);
+        assert_eq!(inputs[1]["witness"].as_array().unwrap().len(), 1);
+        // An input may contribute no witness items at all, and its empty stack
+        // still has to be consumed to stay aligned with the next one.
+        assert_eq!(inputs[2]["witness"].as_array().unwrap().len(), 0);
+        assert_eq!(inputs[2]["script_sig"].as_str().unwrap().len() / 2, 72);
+
+        // 2_100_000_000_000_000 sats, the whole supply, well past u32.
+        assert_eq!(decoded["outputs"][1]["amount"], 21_000_000.0);
+    }
+
     #[test]
     fn decodes_a_legacy_transaction() {
         let decoded: serde_json::Value =
